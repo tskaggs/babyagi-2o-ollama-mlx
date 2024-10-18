@@ -4,6 +4,9 @@
 
 BabyAGI 2o is an exploration into creating the simplest self-building autonomous agent. Unlike its sibling project [BabyAGI 2](https://github.com/yoheinakajima/babyagi), which focuses on storing and executing functions from a database, BabyAGI 2o aims to iteratively build itself by creating and registering tools as required to complete tasks provided by the user. As these functions are not stored, the goal is to integrate this with the BabyAGI 2 framework for persistence of tools created.
 
+> [!CAUTION]
+> Because this installs dependencies and executes code based on an LLMs output, please execute in a safe environment and be mindful of the types of requests you make. I personally use Replit to test this, and you can fork the Replit version [here](https://replit.com/@YoheiNakajima/babyagi-2o?v=1).
+
 ## Features
 
 - **Simple Autonomous Agent**: Capable of building and updating tools to solve user-defined tasks.
