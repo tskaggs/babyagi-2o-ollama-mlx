@@ -1,6 +1,7 @@
 # agents/manager.py
 from agents.message_bus import MessageBus
 from agents.agent import Agent
+from agents.db import init_db, get_db
 import time, re, json, threading
 
 class Manager:
@@ -109,34 +110,63 @@ class Manager:
 
 
     def orchestrate(self):
+        init_db()
         main_task = input(f"{self.colors.BOLD}Describe the task you want to complete: {self.colors.ENDC}")
         print(f"{self.colors.OKBLUE}Manager is analyzing the main task and creating minimal subtasks...{self.colors.ENDC}")
         agent_list = self.estimate_agents(main_task)
         print(f"{self.colors.OKGREEN}Manager created {len(agent_list)} minimal subtasks:{self.colors.ENDC}")
         for i, subtask in enumerate(agent_list):
             print(f"  {i+1}. {subtask}")
+        # Save run and agent assignments to DB
+        with get_db() as conn:
+            c = conn.cursor()
+            c.execute("INSERT INTO runs (task, manager_subtasks) VALUES (?, ?)", (main_task, json.dumps(agent_list)))
+            run_id = c.lastrowid
+            agent_ids = {}
+            for idx, agent_name in enumerate([f"agent_{i+1}" for i in range(len(agent_list))]):
+                c.execute("INSERT INTO agents (run_id, agent_name, assigned_subtask) VALUES (?, ?, ?)", (run_id, agent_name, agent_list[idx]))
+                agent_ids[agent_name] = c.lastrowid
+            conn.commit()
         self.create_agents(agent_list)
         self.assign_tasks(agent_list)
         self.progress = {name: None for name in self.agent_names}
         self.completed = set()
         start_time = time.time()
         token_count = 0
+        # Store for later DB updates
+        self._db_run_id = run_id
+        self._db_agent_ids = agent_ids
         # Show agent assignments
         print(f"\n{self.colors.BOLD}Agent Assignments:{self.colors.ENDC}")
         for idx, name in enumerate(self.agent_names):
             emoji = self.agent_emojis[idx % len(self.agent_emojis)]
             print(f"  {emoji} {name}: {agent_list[idx]}")
 
+        iteration_counters = {name: 0 for name in self.agent_names}
+        last_update_times = {name: None for name in self.agent_names}
         while True:
             updated = False
             for idx, name in enumerate(self.agent_names):
                 msgs = self.bus.receive("manager", since=0)
                 for msg in msgs:
                     if msg['sender'] == name:
+                        now = time.time()
                         if self.progress[name] != msg['content']:
+                            prev_time = last_update_times[name] or now
+                            duration = now - prev_time
+                            last_update_times[name] = now
                             self.progress[name] = msg['content']
                             updated = True
                             token_count += len(msg['content'].split())
+                            # Save iteration to DB
+                            with get_db() as conn:
+                                c = conn.cursor()
+                                c.execute(
+                                    "INSERT INTO agent_iterations (agent_id, iteration, response, duration, tokens_used) VALUES (?, ?, ?, ?, ?)",
+                                    (self._db_agent_ids[name], iteration_counters[name], msg['content'], duration, len(msg['content'].split()))
+                                )
+                                conn.commit()
+                            iteration_counters[name] += 1
                         if "task completed" in msg['content'].lower():
                             self.completed.add(name)
             if updated and self.verbose:
@@ -152,10 +182,20 @@ class Manager:
         print()
         print(f"\n{self.colors.BOLD}{self.colors.OKGREEN}All agents completed their minimal tasks!{self.colors.ENDC}")
         print(f"\n{self.colors.BOLD}{self.colors.OKBLUE}Summary of Solutions:{self.colors.ENDC}")
+        manager_summary = []
         for name in self.agent_names:
             print(f"{self.colors.OKCYAN}{name}:{self.colors.ENDC}\n{self.progress[name]}\n{'-'*40}")
+            manager_summary.append(f"{name}: {self.progress[name]}")
         print(f"{self.colors.BOLD}Total time elapsed:{self.colors.ENDC} {elapsed:.2f} seconds")
         print(f"{self.colors.BOLD}Approximate total tokens used:{self.colors.ENDC} {token_count}")
+        # Save manager summary and run stats to DB
+        with get_db() as conn:
+            c = conn.cursor()
+            c.execute(
+                "UPDATE runs SET manager_summary=?, total_time=?, total_tokens=? WHERE id=?",
+                ("\n".join(manager_summary), elapsed, token_count, self._db_run_id)
+            )
+            conn.commit()
         print(f"\n{self.colors.BOLD}{self.colors.OKGREEN}All tasks are complete!{self.colors.ENDC}")
         print(f"\n{self.colors.BOLD}{self.colors.OKBLUE}Manager: Do you have any questions, suggestions, or would you like to start a new task?{self.colors.ENDC}")
         user_input = input(f"{self.colors.BOLD}Enter your feedback or type a new task: {self.colors.ENDC}")
