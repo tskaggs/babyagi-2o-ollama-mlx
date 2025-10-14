@@ -1,5 +1,7 @@
+# agents/message_bus.py
 import threading
 import time
+
 
 class MessageBus:
     def __init__(self):

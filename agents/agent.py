@@ -1,4 +1,6 @@
+# agents/agent.py
 from agents.message_bus import MessageBus
+import threading, time, json, traceback
 
 class Agent:
     def __init__(self, name, task, color, emoji, model_name, ollama, colors, bus: MessageBus, verbose=False):
@@ -14,8 +16,8 @@ class Agent:
         self.completed = False
         self.verbose = verbose
 
+
     def run(self):
-        import threading, time, json, traceback
         max_iterations = 3
         lock = threading.Lock()
         task_done = threading.Event()
@@ -34,8 +36,8 @@ class Agent:
         for iteration in range(max_iterations):
             if task_done.is_set():
                 break
-            if self.verbose:
-                print(f"{agent_prefix}{self.colors.HEADER}{self.colors.BOLD}Iteration {iteration + 1} of {max_iterations} running...{self.colors.ENDC}")
+            # if self.verbose:
+            print(f"{agent_prefix}{self.colors.HEADER}{self.colors.BOLD}Iteration {iteration + 1} of {max_iterations} running...{self.colors.ENDC}")
             try:
                 # Check for new messages from other agents
                 new_msgs = self.bus.receive(self.name, since=last_msg_time)
@@ -107,7 +109,7 @@ class Agent:
                 if self.verbose:
                     print(f"{agent_prefix}{self.colors.FAIL}{self.colors.BOLD}Error:{self.colors.ENDC} Error in agent loop: {e}")
                 traceback.print_exc()
-        time.sleep(0.1)
+            time.sleep(0.1)
         if self.verbose:
             print(f"\n{agent_prefix}{self.colors.WARNING}{self.colors.BOLD}Max iterations reached or task completed.{self.colors.ENDC}")
             print(f"{agent_prefix}{self.colors.BOLD}Agent Iteration Results:{self.colors.ENDC}")

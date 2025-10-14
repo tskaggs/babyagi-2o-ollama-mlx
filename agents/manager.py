@@ -1,5 +1,7 @@
+# agents/manager.py
 from agents.message_bus import MessageBus
 from agents.agent import Agent
+import time, re, json, threading
 
 class Manager:
     def __init__(self, model_name, ollama, colors, agent_colors, agent_emojis, verbose=False):
@@ -15,10 +17,8 @@ class Manager:
         self.completed = set()
         self.verbose = verbose
 
-
     def estimate_agents(self, main_task):
         """Use Ollama to estimate a list of subtasks/agents for the main task."""
-        import re, json
         base_prompt = (
             "You are an expert project planner. Given a user task, break it down into 2-6 clear, actionable subtasks. "
             "Return only a JSON list of strings, each string being a subtask. Do not include any explanation, markdown, or extra text. "
@@ -56,30 +56,29 @@ class Manager:
                     return agent_list
             except Exception:
                 pass
-        # Fallback: try to extract from numbered/bulleted list
-        lines = content.splitlines()
-        extracted = []
-        for line in lines:
-            m = re.match(r'\s*(?:\d+\.|[-*])\s+(.*)', line)
-            if m:
-                item = m.group(1).strip().strip('"').strip("'")
-                if item:
-                    extracted.append(item)
-        if extracted:
-            print(f"{self.colors.WARNING}LLM did not return JSON, but extracted {len(extracted)} subtasks from text list.{self.colors.ENDC}")
-            return extracted
-        # Final fallback: split into sentences if possible
-        sentences = re.split(r'(?<=[.!?])\s+', content.strip())
-        sentences = [s.strip() for s in sentences if len(s.strip()) > 10]
-        if len(sentences) > 1:
-            print(f"{self.colors.WARNING}LLM did not return a list, but split into {len(sentences)} subtasks using sentences.{self.colors.ENDC}")
-            return sentences
-        print(f"{self.colors.FAIL}Could not parse agent list from LLM after 3 attempts and all fallbacks. Defaulting to single task.{self.colors.ENDC}")
-        return [main_task]
+            # Fallback: try to extract from numbered/bulleted list
+            lines = content.splitlines()
+            extracted = []
+            for line in lines:
+                m = re.match(r'\s*(?:\d+\.|[-*])\s+(.*)', line)
+                if m:
+                    item = m.group(1).strip().strip('"').strip("'")
+                    if item:
+                        extracted.append(item)
+            if extracted:
+                print(f"{self.colors.WARNING}LLM did not return JSON, but extracted {len(extracted)} subtasks from text list.{self.colors.ENDC}")
+                return extracted
+            # Final fallback: split into sentences if possible
+            sentences = re.split(r'(?<=[.!?])\s+', content.strip())
+            sentences = [s.strip() for s in sentences if len(s.strip()) > 10]
+            if len(sentences) > 1:
+                print(f"{self.colors.WARNING}LLM did not return a list, but split into {len(sentences)} subtasks using sentences.{self.colors.ENDC}")
+                return sentences
+            print(f"{self.colors.FAIL}Could not parse agent list from LLM after 3 attempts and all fallbacks. Defaulting to single task.{self.colors.ENDC}")
+            return [main_task]
 
 
     def create_agents(self, agent_list):
-        import threading
         self.agents = []
         self.agent_names = []
         for idx, agent_task in enumerate(agent_list):
@@ -110,7 +109,6 @@ class Manager:
 
 
     def orchestrate(self):
-        import time
         main_task = input(f"{self.colors.BOLD}Describe the task you want to complete: {self.colors.ENDC}")
         print(f"{self.colors.OKBLUE}Manager is analyzing the main task and creating minimal subtasks...{self.colors.ENDC}")
         agent_list = self.estimate_agents(main_task)
@@ -123,15 +121,12 @@ class Manager:
         self.completed = set()
         start_time = time.time()
         token_count = 0
-        # For non-verbose: show assignments and working emoji list
-        if not self.verbose:
-            print(f"\n{self.colors.BOLD}Agent Assignments:{self.colors.ENDC}")
-            for idx, name in enumerate(self.agent_names):
-                emoji = self.agent_emojis[idx % len(self.agent_emojis)]
-                print(f"  {emoji} {name}: {agent_list[idx]}")
-            working_emojis = set()
-        else:
-            print(f"{self.colors.OKBLUE}Manager is orchestrating agent work and monitoring progress...{self.colors.ENDC}")
+        # Show agent assignments
+        print(f"\n{self.colors.BOLD}Agent Assignments:{self.colors.ENDC}")
+        for idx, name in enumerate(self.agent_names):
+            emoji = self.agent_emojis[idx % len(self.agent_emojis)]
+            print(f"  {emoji} {name}: {agent_list[idx]}")
+
         while True:
             updated = False
             for idx, name in enumerate(self.agent_names):
@@ -142,12 +137,6 @@ class Manager:
                             self.progress[name] = msg['content']
                             updated = True
                             token_count += len(msg['content'].split())
-                            if not self.verbose:
-                                emoji = self.agent_emojis[idx % len(self.agent_emojis)]
-                                working_emojis.add(emoji)
-                                print(f"\r{self.colors.OKBLUE}Working agents: {''.join(sorted(working_emojis))}{self.colors.ENDC}", end='', flush=True)
-                            else:
-                                print(f"{self.colors.OKCYAN}Manager received update from {name}:{self.colors.ENDC} {msg['content']}")
                         if "task completed" in msg['content'].lower():
                             self.completed.add(name)
             if updated and self.verbose:
@@ -158,6 +147,7 @@ class Manager:
             if len(self.completed) == len(self.agent_names):
                 break
             time.sleep(0.1)
+        print()
         elapsed = time.time() - start_time
         print()
         print(f"\n{self.colors.BOLD}{self.colors.OKGREEN}All agents completed their minimal tasks!{self.colors.ENDC}")
