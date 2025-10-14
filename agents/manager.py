@@ -55,8 +55,8 @@ class Manager:
                 agent_list = json.loads(content)
                 if isinstance(agent_list, list) and all(isinstance(x, str) for x in agent_list):
                     return agent_list
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"{self.colors.WARNING}Attempt {attempt+1}: Could not parse JSON from LLM response. Error: {e}")
             # Fallback: try to extract from numbered/bulleted list
             lines = content.splitlines()
             extracted = []
@@ -67,16 +67,16 @@ class Manager:
                     if item:
                         extracted.append(item)
             if extracted:
-                print(f"{self.colors.WARNING}LLM did not return JSON, but extracted {len(extracted)} subtasks from text list.{self.colors.ENDC}")
+                print(f"{self.colors.WARNING}LLM did not return JSON, but extracted {len(extracted)} subtasks from text list. Raw response was:{self.colors.ENDC}\n{content}")
                 return extracted
             # Final fallback: split into sentences if possible
             sentences = re.split(r'(?<=[.!?])\s+', content.strip())
             sentences = [s.strip() for s in sentences if len(s.strip()) > 10]
             if len(sentences) > 1:
-                print(f"{self.colors.WARNING}LLM did not return a list, but split into {len(sentences)} subtasks using sentences.{self.colors.ENDC}")
+                print(f"{self.colors.WARNING}LLM did not return a list, but split into {len(sentences)} subtasks using sentences. Raw response was:{self.colors.ENDC}\n{content}")
                 return sentences
-            print(f"{self.colors.FAIL}Could not parse agent list from LLM after 3 attempts and all fallbacks. Defaulting to single task.{self.colors.ENDC}")
-            return [main_task]
+        print(f"{self.colors.FAIL}Could not parse agent list from LLM after 3 attempts and all fallbacks.\nRaw LLM response was:{self.colors.ENDC}\n{content}")
+        return [main_task]
 
 
     def create_agents(self, agent_list):
@@ -111,24 +111,82 @@ class Manager:
 
     def orchestrate(self):
         init_db()
-        main_task = input(f"{self.colors.BOLD}Describe the task you want to complete: {self.colors.ENDC}")
+        # Show two example tasks and allow user to select or enter their own
+        example1 = "Scrape techmeme.com and summarize the top headlines."
+        example2 = "Analyze image.jpg in your folder and describe the image."
+        print(f"{self.colors.BOLD}Describe the task you want to complete:{self.colors.ENDC}")
+        print(f"  1. {example1}")
+        print(f"  2. {example2}")
+        print(f"  3. Enter your own task")
+        choice = input(f"{self.colors.OKBLUE}Select 1, 2, or type your own task:{self.colors.ENDC} ")
+        if choice.strip() == '1':
+            main_task = example1
+        elif choice.strip() == '2':
+            main_task = example2
+        elif choice.strip() == '3' or not choice.strip():
+            main_task = input(f"{self.colors.OKBLUE}Enter your custom task:{self.colors.ENDC} ")
+        else:
+            main_task = choice.strip()
         print(f"{self.colors.OKBLUE}Manager is analyzing the main task and creating minimal subtasks...{self.colors.ENDC}")
         agent_list = self.estimate_agents(main_task)
         print(f"{self.colors.OKGREEN}Manager created {len(agent_list)} minimal subtasks:{self.colors.ENDC}")
         for i, subtask in enumerate(agent_list):
             print(f"  {i+1}. {subtask}")
+
+        # Prompt for number of agents (default 1)
+        while True:
+            num_agents = input(f"{self.colors.OKBLUE}How many agents do you want to use? (1-infinite, default 1): {self.colors.ENDC}")
+            if not num_agents.strip():
+                num_agents = 1
+                break
+            try:
+                num_agents = int(num_agents)
+                if num_agents >= 1:
+                    break
+            except Exception:
+                pass
+            print(f"{self.colors.WARNING}Please enter a valid integer >= 1 or leave blank for 1.{self.colors.ENDC}")
+
+        # Prompt for number of iterations (default 1)
+        while True:
+            num_iterations = input(f"{self.colors.OKBLUE}How many iterations per agent? (1-infinite, default 1): {self.colors.ENDC}")
+            if not num_iterations.strip():
+                num_iterations = 1
+                break
+            try:
+                num_iterations = int(num_iterations)
+                if num_iterations >= 1:
+                    break
+            except Exception:
+                pass
+            print(f"{self.colors.WARNING}Please enter a valid integer >= 1 or leave blank for 1.{self.colors.ENDC}")
+
+        self.num_agents = num_agents
+        self.num_iterations = num_iterations
+
+        # Assign subtasks to agents
+        if self.num_agents == 1:
+            agent_names = ["agent_1"]
+            agent_subtasks = [agent_list]
+        else:
+            agent_names = [f"agent_{i+1}" for i in range(self.num_agents)]
+            agent_subtasks = [[] for _ in range(self.num_agents)]
+            for idx, subtask in enumerate(agent_list):
+                agent_subtasks[idx % self.num_agents].append(subtask)
+
         # Save run and agent assignments to DB
         with get_db() as conn:
             c = conn.cursor()
             c.execute("INSERT INTO runs (task, manager_subtasks) VALUES (?, ?)", (main_task, json.dumps(agent_list)))
             run_id = c.lastrowid
             agent_ids = {}
-            for idx, agent_name in enumerate([f"agent_{i+1}" for i in range(len(agent_list))]):
-                c.execute("INSERT INTO agents (run_id, agent_name, assigned_subtask) VALUES (?, ?, ?)", (run_id, agent_name, agent_list[idx]))
+            for idx, agent_name in enumerate(agent_names):
+                c.execute("INSERT INTO agents (run_id, agent_name, assigned_subtask) VALUES (?, ?, ?)", (run_id, agent_name, json.dumps(agent_subtasks[idx])))
                 agent_ids[agent_name] = c.lastrowid
             conn.commit()
-        self.create_agents(agent_list)
-        self.assign_tasks(agent_list)
+        self.create_agents(agent_subtasks)
+        self.assign_tasks(["; ".join(tasks) for tasks in agent_subtasks])
+        self.agent_names = agent_names
         self.progress = {name: None for name in self.agent_names}
         self.completed = set()
         start_time = time.time()
