@@ -66,9 +66,6 @@ class Manager:
                     item = m.group(1).strip().strip('"').strip("'")
                     if item:
                         extracted.append(item)
-            if extracted:
-                print(f"{self.colors.WARNING}LLM did not return JSON, but extracted {len(extracted)} subtasks from text list. Raw response was:{self.colors.ENDC}\n{content}")
-                return extracted
             # Final fallback: split into sentences if possible
             sentences = re.split(r'(?<=[.!?])\s+', content.strip())
             sentences = [s.strip() for s in sentences if len(s.strip()) > 10]
@@ -78,10 +75,10 @@ class Manager:
         print(f"{self.colors.FAIL}Could not parse agent list from LLM after 3 attempts and all fallbacks.\nRaw LLM response was:{self.colors.ENDC}\n{content}")
         return [main_task]
 
-
+    # [MANAGER] log only in main orchestration/review logic
     def create_agents(self, agent_list):
-        self.agents = []
         self.agent_names = []
+        self.agents = []
         for idx, agent_task in enumerate(agent_list):
             agent_name = f"agent_{idx+1}"
             self.agent_names.append(agent_name)
@@ -115,10 +112,10 @@ class Manager:
         # Show two example tasks and allow user to select or enter their own
         example1 = "Scrape techmeme.com and summarize the top headlines."
         example2 = "Analyze image.jpg in your folder and describe the image."
-        print(f"{self.colors.BOLD}Describe the task you want to complete:{self.colors.ENDC}")
-        print(f"  1. {example1}")
-        print(f"  2. {example2}")
-        print(f"  3. Enter your own task")
+        print(f"[MANAGER] {self.colors.BOLD}Describe the task you want to complete:{self.colors.ENDC}", flush=True)
+        print(f"[MANAGER]   1. {example1}", flush=True)
+        print(f"[MANAGER]   2. {example2}", flush=True)
+        print(f"[MANAGER]   3. Enter your own task", flush=True)
         choice = input(f"{self.colors.OKBLUE}Select 1, 2, or type your own task:{self.colors.ENDC} ")
         if choice.strip() == '1':
             main_task = example1
@@ -128,11 +125,11 @@ class Manager:
             main_task = input(f"{self.colors.OKBLUE}Enter your custom task:{self.colors.ENDC} ")
         else:
             main_task = choice.strip()
-        print(f"{self.colors.OKBLUE}Manager is analyzing the main task and creating minimal subtasks...{self.colors.ENDC}")
+        print(f"[MANAGER] {self.colors.OKBLUE}Manager is analyzing the main task and creating minimal subtasks...{self.colors.ENDC}", flush=True)
         agent_list = self.estimate_agents(main_task)
-        print(f"{self.colors.OKGREEN}Manager created {len(agent_list)} minimal subtasks:{self.colors.ENDC}")
+        print(f"[MANAGER] {self.colors.OKGREEN}Manager created {len(agent_list)} minimal subtasks:{self.colors.ENDC}", flush=True)
         for i, subtask in enumerate(agent_list):
-            print(f"  {i+1}. {subtask}")
+            print(f"[MANAGER]   {i+1}. {subtask}", flush=True)
 
         # Prompt for number of agents (default 1)
         while True:
@@ -144,9 +141,30 @@ class Manager:
                 num_agents = int(num_agents)
                 if num_agents >= 1:
                     break
+
             except Exception:
                 pass
-            print(f"{self.colors.WARNING}Please enter a valid integer >= 1 or leave blank for 1.{self.colors.ENDC}")
+
+        # Assign subtasks to agents
+        if num_agents == 1:
+            agent_names = ["agent_1"]
+            agent_subtasks = [agent_list]
+        else:
+            agent_names = [f"agent_{i+1}" for i in range(num_agents)]
+            agent_subtasks = [[] for _ in range(num_agents)]
+            for idx, subtask in enumerate(agent_list):
+                agent_subtasks[idx % num_agents].append(subtask)
+
+        print(f"\n[MANAGER] {self.colors.BOLD}Agent Assignments:{self.colors.ENDC}", flush=True)
+        for idx, name in enumerate(agent_names):
+            emoji = self.agent_emojis[idx % len(self.agent_emojis)]
+            # Show all subtasks for each agent
+            if num_agents == 1:
+                for j, subtask in enumerate(agent_list):
+                    print(f"[MANAGER]   {emoji} {name}: {subtask}", flush=True)
+            else:
+                for j, subtask in enumerate(agent_subtasks[idx]):
+                    print(f"[MANAGER]   {emoji} {name} subtask {j+1}: {subtask}", flush=True)
 
         # Prompt for number of iterations (default 1)
         while True:
@@ -186,7 +204,6 @@ class Manager:
                 agent_ids[agent_name] = c.lastrowid
             conn.commit()
         self.create_agents(agent_subtasks)
-        self.assign_tasks(["; ".join(tasks) for tasks in agent_subtasks])
         self.agent_names = agent_names
         self.progress = {name: None for name in self.agent_names}
         self.completed = set()
@@ -196,84 +213,98 @@ class Manager:
         self._db_run_id = run_id
         self._db_agent_ids = agent_ids
         # Show agent assignments
-        print(f"\n{self.colors.BOLD}Agent Assignments:{self.colors.ENDC}")
+        print(f"\n[MANAGER] {self.colors.BOLD}Agent Assignments:{self.colors.ENDC}", flush=True)
         for idx, name in enumerate(self.agent_names):
             emoji = self.agent_emojis[idx % len(self.agent_emojis)]
-            print(f"  {emoji} {name}: {agent_list[idx]}")
+            print(f"[MANAGER]   {emoji} {name}: {agent_list[idx]}", flush=True)
 
+        # --- Main review/approval loop ---
+        # --- Main review/approval loop (clean implementation) ---
         iteration_counters = {name: 0 for name in self.agent_names}
         last_update_times = {name: None for name in self.agent_names}
-        agent_task_progress = {name: [] for name in self.agent_names}  # List of (task_idx, iteration, content)
-        agent_task_summaries = {name: [] for name in self.agent_names}  # List of summaries per task
+        agent_task_progress = {name: [] for name in self.agent_names}
+        agent_task_summaries = {name: [] for name in self.agent_names}
         agent_current_task = {name: 0 for name in self.agent_names}
-        agent_task_done = {name: set() for name in self.agent_names}  # Set of completed task indices
-        all_tasks_complete = set()
+
         while True:
             updated = False
-            for idx, name in enumerate(self.agent_names):
+            for name in self.agent_names:
+                if name in self.completed:
+                    continue
+                now = time.time()
                 msgs = self.bus.receive("manager", since=0)
                 for msg in msgs:
-                    if msg['sender'] == name:
-                        now = time.time()
-                        if self.progress[name] != msg['content']:
-                            prev_time = last_update_times[name] or now
-                            duration = now - prev_time
-                            last_update_times[name] = now
-                            self.progress[name] = msg['content']
-                            updated = True
-                            token_count += len(msg['content'].split())
-                            # Save iteration to DB
-                            with get_db() as conn:
-                                c = conn.cursor()
-                                c.execute(
-                                    "INSERT INTO agent_iterations (agent_id, iteration, response, duration, tokens_used) VALUES (?, ?, ?, ?, ?)",
-                                    (self._db_agent_ids[name], iteration_counters[name], msg['content'], duration, len(msg['content'].split()))
-                                )
-                                conn.commit()
-                            # Track progress for review
-                            agent_task_progress[name].append((agent_current_task[name], iteration_counters[name], msg['content']))
-                            # Manager reviews the solution after each iteration
-                            print(f"{self.colors.BOLD}{self.colors.WARNING}Manager reviewing {name} task {agent_current_task[name]+1} iteration {iteration_counters[name]+1}...{self.colors.ENDC}")
-                            # Simple heuristic: if 'task completed' or 'done' in content, consider task complete
-                            content_lower = msg['content'].lower()
-                            task_complete = ("task completed" in content_lower or "done" in content_lower)
-                            # Summarize the completed task if done
-                            if task_complete:
-                                summary = f"Task {agent_current_task[name]+1} completed by {name}: {msg['content']}"
-                                agent_task_summaries[name].append(summary)
-                                print(f"{self.colors.OKGREEN}Manager: {summary}{self.colors.ENDC}")
-                                agent_task_done[name].add(agent_current_task[name])
-                                # Move to next task for this agent
-                                agent_current_task[name] += 1
-                                iteration_counters[name] = 0
-                                continue
-                            else:
-                                iteration_counters[name] += 1
+                    if msg['sender'] == name and self.progress[name] != msg['content']:
+                        prev_time = last_update_times[name] or now
+                        duration = now - prev_time
+                        last_update_times[name] = now
+                        self.progress[name] = msg['content']
+                        token_count += len(msg['content'].split())
+                        # Save iteration to DB
+                        with get_db() as conn:
+                            c = conn.cursor()
+                            c.execute(
+                                "INSERT INTO agent_iterations (agent_id, iteration, response, duration, tokens_used) VALUES (?, ?, ?, ?, ?)",
+                                (self._db_agent_ids[name], iteration_counters[name], msg['content'], duration, len(msg['content'].split()))
+                            )
+                        # Track progress for review
+                        agent_task_progress[name].append((agent_current_task[name], iteration_counters[name], msg['content']))
+                        # --- Manager review logic ---
+                        for review_attempt in range(3):
+                            try:
+                                print(f"[MANAGER] {self.colors.BOLD}{self.colors.WARNING}Manager reviewing {name} task {agent_current_task[name]+1} iteration {iteration_counters[name]+1}:{self.colors.ENDC}\n{msg['content']}", flush=True)
+                                content_lower = msg['content'].lower()
+                                if 'task completed' in content_lower or 'done' in content_lower:
+                                    approval = True
+                                    reason = "Task requirements met (contains 'task completed' or 'done')."
+                                else:
+                                    approval = False
+                                    reason = "Task requirements not met. Needs further iteration."
+                                if approval:
+                                    print(f"[MANAGER] {self.colors.OKGREEN}Manager APPROVED {name} task {agent_current_task[name]+1} iteration {iteration_counters[name]+1}: {reason}{self.colors.ENDC}", flush=True)
+                                    summary = f"Task {agent_current_task[name]+1} completed by {name}: {msg['content']}"
+                                    agent_task_summaries[name].append(summary)
+                                    agent_current_task[name] += 1
+                                    iteration_counters[name] = 0
+                                    break
+                                else:
+                                    print(f"[MANAGER] {self.colors.FAIL}Manager DISAPPROVED {name} task {agent_current_task[name]+1} iteration {iteration_counters[name]+1}: {reason}{self.colors.ENDC}", flush=True)
+                                    iteration_counters[name] += 1
+                                    break
+                            except Exception as e:
+                                print(f"[MANAGER] {self.colors.FAIL}Manager review error for {name} task {agent_current_task[name]+1} iteration {iteration_counters[name]+1}: {e}{self.colors.ENDC}", flush=True)
+                                if review_attempt < 2:
+                                    print(f"[MANAGER] {self.colors.WARNING}Manager review retrying ({review_attempt+1}/3)...{self.colors.ENDC}", flush=True)
+                                    time.sleep(1)
+                                else:
+                                    print(f"[MANAGER] {self.colors.FAIL}Manager review failed after 3 attempts. Skipping review for this iteration.{self.colors.ENDC}", flush=True)
                         # If agent has completed all tasks, mark as done
                         if agent_current_task[name] >= len(json.loads(self._get_agent_tasks(name))):
                             self.completed.add(name)
-                            all_tasks_complete.add(name)
-            if updated and self.verbose:
-                print(f"{self.colors.BOLD}Manager Progress Report:{self.colors.ENDC}")
+                        updated = True
+            if updated:
+                print(f"[MANAGER] {self.colors.BOLD}{self.colors.OKBLUE}Manager Progress Report:{self.colors.ENDC}", flush=True)
                 for name in self.agent_names:
                     status = self.progress[name] if self.progress[name] else "No update yet."
-                    print(f"  {name}: {status}")
+                    print(f"[MANAGER]   {name}: {status}", flush=True)
             if len(self.completed) == len(self.agent_names):
                 break
             time.sleep(0.1)
 
         # Summarize all completed tasks for each agent
-        print(f"\n{self.colors.BOLD}{self.colors.OKBLUE}Manager Task Summaries:{self.colors.ENDC}")
+        print(f"\n[MANAGER] {self.colors.BOLD}{self.colors.OKBLUE}Manager Task Summaries:{self.colors.ENDC}", flush=True)
         for name in self.agent_names:
             for summary in agent_task_summaries[name]:
-                print(f"{self.colors.OKCYAN}{summary}{self.colors.ENDC}")
+                print(f"[MANAGER] {self.colors.OKCYAN}{summary}{self.colors.ENDC}", flush=True)
 
         # Final review and summary
-        print(f"\n{self.colors.BOLD}{self.colors.OKGREEN}Manager Full Review of Solution:{self.colors.ENDC}")
+        print(f"\n[MANAGER] {self.colors.BOLD}{self.colors.OKGREEN}Manager Full Review of Solution:{self.colors.ENDC}", flush=True)
         for name in self.agent_names:
-            print(f"{self.colors.BOLD}{name}:{self.colors.ENDC}")
+            print(f"[MANAGER] {self.colors.BOLD}{name}:{self.colors.ENDC}", flush=True)
             for (task_idx, iteration, content) in agent_task_progress[name]:
-                print(f"  Task {task_idx+1}, Iteration {iteration+1}: {content}")
+                print(f"[MANAGER]   Task {task_idx+1}, Iteration {iteration+1}: {content}", flush=True)
+        print(f"\n[MANAGER] {self.colors.BOLD}{self.colors.OKGREEN}All agents and tasks are complete!{self.colors.ENDC}", flush=True)
+
 
     def _get_agent_tasks(self, name):
         # Helper to get the list of tasks assigned to an agent from the DB
@@ -287,27 +318,3 @@ class Manager:
                 except Exception:
                     return "[]"
             return "[]"
-        print()
-        elapsed = time.time() - start_time
-        print()
-        print(f"\n{self.colors.BOLD}{self.colors.OKGREEN}All agents completed their minimal tasks!{self.colors.ENDC}")
-        print(f"\n{self.colors.BOLD}{self.colors.OKBLUE}Summary of Solutions:{self.colors.ENDC}")
-        manager_summary = []
-        for name in self.agent_names:
-            print(f"{self.colors.OKCYAN}{name}:{self.colors.ENDC}\n{self.progress[name]}\n{'-'*40}")
-            manager_summary.append(f"{name}: {self.progress[name]}")
-        print(f"{self.colors.BOLD}Total time elapsed:{self.colors.ENDC} {elapsed:.2f} seconds")
-        print(f"{self.colors.BOLD}Approximate total tokens used:{self.colors.ENDC} {token_count}")
-        # Save manager summary and run stats to DB
-        with get_db() as conn:
-            c = conn.cursor()
-            c.execute(
-                "UPDATE runs SET manager_summary=?, total_time=?, total_tokens=? WHERE id=?",
-                ("\n".join(manager_summary), elapsed, token_count, self._db_run_id)
-            )
-            conn.commit()
-        print(f"\n{self.colors.BOLD}{self.colors.OKGREEN}All tasks are complete!{self.colors.ENDC}")
-        print(f"\n{self.colors.BOLD}{self.colors.OKBLUE}Manager: Do you have any questions, suggestions, or would you like to start a new task?{self.colors.ENDC}")
-        user_input = input(f"{self.colors.BOLD}Enter your feedback or type a new task: {self.colors.ENDC}")
-        if user_input.strip():
-            print(f"{self.colors.OKCYAN}Manager received your input: {user_input}{self.colors.ENDC}")
