@@ -1,5 +1,6 @@
 # agents/agent.py
 from agents.message_bus import MessageBus
+from agents.db import get_db
 import threading, time, json, traceback
 
 class Agent:
@@ -33,11 +34,15 @@ class Agent:
             )
         }, {"role": "user", "content": self.task}]
 
+        parent_iteration_id = None
         for iteration in range(max_iterations):
             if task_done.is_set():
                 break
-            # if self.verbose:
             print(f"{agent_prefix}{self.colors.HEADER}{self.colors.BOLD}Iteration {iteration + 1} of {max_iterations} running...{self.colors.ENDC}")
+            prompt = json.dumps(messages)
+            tags = json.dumps({})  # Placeholder for custom tags/events
+            error = None
+            t0 = time.time()
             try:
                 # Check for new messages from other agents
                 new_msgs = self.bus.receive(self.name, since=last_msg_time)
@@ -53,6 +58,7 @@ class Agent:
                     try:
                         response = self.ollama.chat(model=self.model_name, messages=messages)
                     except Exception as e:
+                        error = str(e)
                         if 'hourly usage limit' in str(e) or 'status code: 402' in str(e):
                             print(f"{self.colors.FAIL}Error Ollama: Feed the llama! You've reached your hourly usage limit, please upgrade to continue{self.colors.ENDC}")
                             exit(1)
@@ -106,9 +112,23 @@ class Agent:
                             print(f"{agent_prefix}{self.colors.OKGREEN}{self.colors.BOLD}Task completed.{self.colors.ENDC}")
                             task_done.set()
             except Exception as e:
+                error = str(e)
                 if self.verbose:
                     print(f"{agent_prefix}{self.colors.FAIL}{self.colors.BOLD}Error:{self.colors.ENDC} Error in agent loop: {e}")
                 traceback.print_exc()
+            t1 = time.time()
+            # Save iteration to DB if possible (manager will also log, but this is for full traceability)
+            try:
+                if hasattr(self, 'db_agent_id'):
+                    with get_db() as conn:
+                        c = conn.cursor()
+                        c.execute(
+                            "INSERT INTO agent_iterations (agent_id, iteration, prompt, response, duration, tokens_used, error, tags, parent_iteration_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                            (self.db_agent_id, iteration, prompt, content, t1-t0, len(content.split()), error, tags, parent_iteration_id)
+                        )
+                        conn.commit()
+            except Exception:
+                pass
             time.sleep(0.1)
         if self.verbose:
             print(f"\n{agent_prefix}{self.colors.WARNING}{self.colors.BOLD}Max iterations reached or task completed.{self.colors.ENDC}")

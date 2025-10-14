@@ -36,10 +36,13 @@ def init_db():
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         agent_id INTEGER,
         iteration INTEGER,
+        prompt TEXT,
         response TEXT,
         duration REAL,
         tokens_used INTEGER,
         error TEXT,
+        tags TEXT,
+        parent_iteration_id INTEGER,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY(agent_id) REFERENCES agents(id)
     )''')
