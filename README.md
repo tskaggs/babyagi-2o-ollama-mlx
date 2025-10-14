@@ -1,4 +1,4 @@
-# babyagi-2o
+# babyagi-2o + Ollama
 
 **BabyAGI 2o** - *the simplest self-building autonomous agent.*
 
@@ -7,14 +7,20 @@ BabyAGI 2o is an exploration into creating the simplest self-building autonomous
 > [!CAUTION]
 > Because this installs dependencies and executes code based on an LLMs output, please execute in a safe environment and be mindful of the types of requests you make. I personally use Replit to test this, and you can fork the Replit version [here](https://replit.com/@YoheiNakajima/babyagi-2o?v=1).
 
+
 ## Features
 
-- **Simple Autonomous Agent**: Capable of building and updating tools to solve user-defined tasks.
-- **Dynamic Tool Creation**: The agent creates and updates its tools, enabling it to solve increasingly complex tasks without human intervention.
+- **Manager/Agent Modularity**: Clean separation between a manager (task orchestrator) and agents (task executors), each as a Python class for extensibility and clarity.
+- **Parallel Agent Execution**: The manager can break down a task into subtasks and launch multiple agents in parallel, each working on a minimal subtask.
+- **Dynamic Tool Creation**: Agents create and update their own tools (Python functions) as needed to solve their assigned tasks.
 - **Package Management**: Automatically installs required packages for tools.
 - **Error Handling and Iteration**: Handles errors gracefully, learns from them, and continues iterating towards task completion.
 - **Function Storage**: Functions are registered dynamically, allowing them to be reused in future tasks.
-- **Model Flexibility**: Compatible with multiple models via `litellm`, as long as they support tool calling.
+- **Ollama Native**: Uses [Ollama](https://ollama.com/) as the LLM backend. All agent LLM calls are handled via your local or remote Ollama server.
+- **Verbose/Quiet Modes**: Use the `--verbose` flag to see detailed agent output. By default, only agent assignments, a live emoji progress bar, and final summaries are shown for a clean user experience.
+- **Live Agent Progress**: In quiet mode, see which agents are working via a live emoji list. In verbose mode, see all agent logs and LLM responses.
+- **Comprehensive Summaries**: When all agents finish, the manager prints a summary of all solutions, total time elapsed, and an approximate token count.
+- **Ollama Error Handling**: If you hit Ollama's hourly usage limit, a clear red error message is shown and the program exits cleanly.
 
 ## Getting Started
 
@@ -22,6 +28,7 @@ BabyAGI 2o is an exploration into creating the simplest self-building autonomous
 
 - Python 3.7 or higher
 - `pip` package manager
+
 
 ### Installation
 
@@ -42,78 +49,40 @@ BabyAGI 2o is an exploration into creating the simplest self-building autonomous
 3. **Install Dependencies**
 
    ~~~bash
-   pip install litellm
+   pip install -r requirements.txt
    ~~~
 
-### Setting Environment Variables
+4. **Install Ollama**
 
-BabyAGI 2o uses the `litellm` package to interface with language models. Depending on the model you choose (e.g., OpenAI's GPT-4, Anthropic's Claude), you'll need to set the appropriate API keys in your environment variables. You'll also need to specify the model by setting the `LITELLM_MODEL` environment variable. Ensure that the model you choose supports tool/function calling.
+   Follow the instructions at [Ollama's website](https://ollama.com/download) to install Ollama for your platform (macOS, Linux, or Windows).
 
-#### Supported Models
+5. **Pull a Model**
 
-- OpenAI models (e.g., `gpt-4`, `gpt-3.5-turbo`)
-- Anthropic models (e.g., `claude-2`)
-- Any other models supported by `litellm` that support tool calling
-
-#### Option 1: Temporary Setup in Terminal
-
-For **macOS/Linux**:
-
-~~~bash
-export LITELLM_MODEL=gpt-4  # or another supported model
-export OPENAI_API_KEY=your-openai-api-key  # If using an OpenAI model
-export ANTHROPIC_API_KEY=your-anthropic-api-key  # If using an Anthropic model
-~~~
-
-For **Windows (Command Prompt)**:
-
-~~~cmd
-set LITELLM_MODEL=gpt-4  # or another supported model
-set OPENAI_API_KEY=your-openai-api-key  # If using an OpenAI model
-set ANTHROPIC_API_KEY=your-anthropic-api-key  # If using an Anthropic model
-~~~
-
-For **Windows (PowerShell)**:
-
-~~~powershell
-$env:LITELLM_MODEL="gpt-4"  # or another supported model
-$env:OPENAI_API_KEY="your-openai-api-key"  # If using an OpenAI model
-$env:ANTHROPIC_API_KEY="your-anthropic-api-key"  # If using an Anthropic model
-~~~
-
-Run the application:
-
-~~~bash
-python main.py
-~~~
-
-#### Option 2: Persistent Setup using a `.env` File (Recommended)
-
-1. **Install `python-dotenv`** to load environment variables from a `.env` file:
+   For best results, use a large model that supports chat and tool use. For example:
 
    ~~~bash
-   pip install python-dotenv
+   ollama pull gpt-oss:120b-cloud
    ~~~
 
-2. **Create a `.env` file** in the root of the project directory and add your API keys and model configuration:
+   You can also use other models available via Ollama.
+
+6. **Start the Ollama Server**
 
    ~~~bash
-   LITELLM_MODEL=gpt-4  # or another supported model
-   OPENAI_API_KEY=your-openai-api-key  # If using an OpenAI model
-   ANTHROPIC_API_KEY=your-anthropic-api-key  # If using an Anthropic model
+   ollama serve
    ~~~
 
-   *Note: Include only the API key relevant to the model you are using.*
-
-3. **Run the application** as usual:
+7. **Run the Application**
 
    ~~~bash
+   # Run in quiet mode (default, clean output)
    python main.py
+
+   # Run in verbose mode (see all agent output)
+   python main.py --verbose
    ~~~
 
-### Note on Model Selection
-
-Ensure that the model you select supports tool/function calling. Not all models may have this capability. Refer to the `litellm` documentation or the model provider's documentation to confirm.
+**No API keys or .env setup required!** All LLM calls are handled locally via Ollama.
 
 ## Usage
 
@@ -127,11 +96,23 @@ Ensure that the model you select supports tool/function calling. Not all models 
 
    When prompted, enter a description of the task you want BabyAGI 2o to complete. The agent will iterate through creating and using tools, aiming to solve the task autonomously.
 
+
 3. **Monitor Progress**
 
-   The agent will print progress updates as it iterates. If the task is completed, you will see a "Task completed" message.
+   - In default (quiet) mode, you'll see:
+     - Agent assignments with emoji
+     - A live emoji list showing which agents are working
+     - A final summary of all solutions, time elapsed, and token usage
+   - In `--verbose` mode, you'll see:
+     - All agent logs, LLM responses, and detailed progress
 
-4. **View Generated Tools**
+4. **Error Handling**
+
+   - If you hit Ollama's hourly usage limit, you'll see:
+     - `Error Ollama: you've reached your hourly usage limit, please upgrade to continue` (in red)
+     - The program will exit cleanly.
+
+5. **View Generated Tools**
 
    BabyAGI 2o will dynamically create or update Python functions as tools to solve the task.
 
