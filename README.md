@@ -130,6 +130,35 @@ You can see those examples on this [X/Twitter thread](https://x.com/yoheinakajim
 
 This project is an experimental exploration of autonomous agent building. Contributions are welcome, especially if you're interested in integrating this functionality into the [BabyAGI framework](https://github.com/yoheinakajima/babyagi). Feel free to fork the repo, make improvements, and reach out on X/Twitter to discuss ideas. Note that I don't check PRs frequently, so a heads-up is appreciated!
 
+## Database Logging (SQLite)
+
+BabyAGI 2o automatically logs all runs, agent assignments, and agent responses to a local SQLite database (`babyagi.db`). This enables you to analyze, audit, or visualize the agent's reasoning and performance over time.
+
+**What gets saved:**
+- The main task and manager-generated subtasks
+- Each agent and their assigned subtask
+- Every agent iteration: response, duration, and tokens used
+- Agent start/end timestamps, status, and exit reason
+- Any errors encountered during agent iterations
+- The manager's summary, total time, and total tokens for the run
+- The LLM model used and any agent configuration
+- User feedback at the end of the run
+
+**How to view the database:**
+- The database file is `babyagi.db` in your project directory.
+- You can open and explore it with any SQLite GUI, such as:
+  - [DB Browser for SQLite](https://sqlitebrowser.org/)
+  - [TablePlus](https://tableplus.com/)
+  - [DBeaver](https://dbeaver.io/)
+  - [SQLiteFlow](https://sqliteflow.com/) (macOS)
+
+**Schema overview:**
+- `runs`: Each top-level run/task, with summary, timing, tokens, model, and feedback
+- `agents`: Each agent, their assigned subtask, timing, status, and config
+- `agent_iterations`: Each agent's iteration, response, duration, tokens, and errors
+
+No setup is required—logging is automatic. You can query or visualize the data for analytics, debugging, or research.
+
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.

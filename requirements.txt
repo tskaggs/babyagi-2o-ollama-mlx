@@ -1,1 +1,4 @@
 ollama
+
+# SQLite is built-in with Python, but for clarity:
+sqlite3
