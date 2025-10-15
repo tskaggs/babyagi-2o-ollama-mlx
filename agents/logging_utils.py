@@ -14,7 +14,7 @@ def log_manager(message, colors=None, level="INFO", prefix="[MANAGER] ", end="\n
         color = ""
         endc = ""
     else:
-        color = colors.ENDC
+        # color = colors.ENDC
         if level == "INFO":
             color = colors.OKBLUE
         elif level == "SUCCESS":

@@ -78,10 +78,6 @@ class Manager:
         log_manager(f"Could not parse agent list from LLM after 3 attempts and all fallbacks.\nRaw LLM response was:\n{content}", colors=self.colors, level="ERROR")
         return [main_task]
 
-    # [MANAGER] log only in main orchestration/review logic
-    # Agent creation is now handled by AgentService
-    pass
-
 
     def assign_tasks(self, agent_list):
         manager_name = "manager"
@@ -123,8 +119,8 @@ class Manager:
                 num_agents = int(num_agents)
                 if num_agents >= 1:
                     break
-            except Exception:
-                pass
+            except ValueError:
+                print(f"{self.colors.WARNING}Please enter a valid integer greater than or equal to 1.{self.colors.ENDC}")
 
         # Assign subtasks to agents
         if num_agents == 1:

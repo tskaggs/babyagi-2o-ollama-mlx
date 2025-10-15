@@ -17,6 +17,8 @@ class OrchestrationService:
         agent_task_progress = {name: [] for name in self.agent_names}
         agent_task_summaries = {name: [] for name in self.agent_names}
         agent_current_task = {name: 0 for name in self.agent_names}
+        # Cache parsed agent tasks for each agent
+        agent_tasks_cache = {name: json.loads(get_agent_tasks(name)) for name in self.agent_names}
         while True:
             updated = False
             for name in self.agent_names:
@@ -70,7 +72,7 @@ class OrchestrationService:
                                 else:
                                     log_manager(f"{self.colors.FAIL}Manager review failed after 3 attempts. Skipping review for this iteration.{self.colors.ENDC}", colors=self.colors, level="ERROR")
                         # If agent has completed all tasks, mark as done
-                        if agent_current_task[name] >= len(json.loads(get_agent_tasks(name))):
+                        if agent_current_task[name] >= len(agent_tasks_cache[name]):
                             completed.add(name)
                         updated = True
             if updated:
