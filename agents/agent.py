@@ -1,12 +1,12 @@
 # agents/agent.py
-from agents.message_bus import MessageBus
+from agents.logging_utils import log_manager
 from agents.db import get_db
 import threading, time, json, traceback
 
 class Agent:
-    def __init__(self, name, task, color, emoji, model_name, ollama, colors, bus: MessageBus, verbose=False, max_iterations=3):
+
+    def __init__(self, name, task, color, emoji, model_name, ollama, colors, bus, verbose, max_iterations):
         self.name = name
-        # Accept a list of tasks
         self.tasks = task if isinstance(task, list) else [task]
         self.color = color
         self.emoji = emoji
@@ -14,11 +14,9 @@ class Agent:
         self.ollama = ollama
         self.colors = colors
         self.bus = bus
-        self.progress = None
-        self.completed = False
         self.verbose = verbose
         self.max_iterations = max_iterations
-
+        self.progress = []
 
     def run(self):
         lock = threading.Lock()
@@ -26,10 +24,10 @@ class Agent:
         agent_results = []
         last_msg_time = 0
         for task_idx, task in enumerate(self.tasks):
-            print(f"{agent_prefix}{self.colors.OKBLUE}Assigned task {task_idx+1}/{len(self.tasks)}: {task}{self.colors.ENDC}")
+            log_manager(f"{agent_prefix}{self.colors.OKBLUE}Assigned task {task_idx+1}/{len(self.tasks)}: {task}{self.colors.ENDC}", colors=self.colors, level="INFO", prefix="[AGENT] ")
             prev_result = None
             for iteration in range(self.max_iterations):
-                print(f"{agent_prefix}{self.colors.HEADER}{self.colors.BOLD}Iteration {iteration + 1} of {self.max_iterations} for task {task_idx+1}{self.colors.ENDC}")
+                log_manager(f"{agent_prefix}{self.colors.HEADER}{self.colors.BOLD}Iteration {iteration + 1} of {self.max_iterations} for task {task_idx+1}{self.colors.ENDC}", colors=self.colors, level="BOLD", prefix="[AGENT] ")
                 messages = [{
                     "role": "system",
                     "content": (
@@ -49,11 +47,10 @@ class Agent:
                     if new_msgs:
                         for msg in new_msgs:
                             if self.verbose:
-                                print(f"{agent_prefix}{self.colors.WARNING}Received message from {msg['sender']}: {msg['content']}{self.colors.ENDC}")
+                                log_manager(f"{agent_prefix}{self.colors.WARNING}Received message from {msg['sender']}: {msg['content']}{self.colors.ENDC}", colors=self.colors, level="WARNING", prefix="[AGENT] ")
                         last_msg_time = max(msg['timestamp'] for msg in new_msgs)
                         for msg in new_msgs:
                             messages.append({"role": "user", "content": f"[Message from {msg['sender']}]: {msg['content']}"})
-
                     with lock:
                         for attempt in range(3):
                             try:
@@ -82,7 +79,7 @@ class Agent:
                             except Exception:
                                 response_message = {'content': str(response_message)}
                         if response_message.get('content') and self.verbose:
-                            print(f"{agent_prefix}{self.colors.OKCYAN}{self.colors.BOLD}LLM Response:{self.colors.ENDC}\n{response_message['content']}\n")
+                            log_manager(f"{agent_prefix}{self.colors.OKCYAN}{self.colors.BOLD}LLM Response:{self.colors.ENDC}\n{response_message['content']}\n", colors=self.colors, level="INFO", prefix="[AGENT] ")
                         role = response_message.get('role', 'assistant')
                         content = response_message.get('content', '')
                         messages.append({'role': role, 'content': content})
@@ -98,24 +95,24 @@ class Agent:
                                         msg_body = content[first_colon+1:].strip()
                                         self.bus.send(self.name, recipient, msg_body)
                                         if self.verbose:
-                                            print(f"{agent_prefix}{self.colors.OKGREEN}Sent message to {recipient}: {msg_body}{self.colors.ENDC}")
+                                            log_manager(f"{agent_prefix}{self.colors.OKGREEN}Sent message to {recipient}: {msg_body}{self.colors.ENDC}", colors=self.colors, level="SUCCESS", prefix="[AGENT] ")
                                 except Exception as e:
                                     if self.verbose:
-                                        print(f"{agent_prefix}{self.colors.FAIL}Failed to parse/send agent message: {e}{self.colors.ENDC}")
+                                        log_manager(f"{agent_prefix}{self.colors.FAIL}Failed to parse/send agent message: {e}{self.colors.ENDC}", colors=self.colors, level="ERROR", prefix="[AGENT] ")
                         if response_message.get('tool_calls') and self.verbose:
-                            print(f"{agent_prefix}{self.colors.OKBLUE}{self.colors.BOLD}Tool calls detected:{self.colors.ENDC} {len(response_message['tool_calls'])}")
+                            log_manager(f"{agent_prefix}{self.colors.OKBLUE}{self.colors.BOLD}Tool calls detected:{self.colors.ENDC} {len(response_message['tool_calls'])}", colors=self.colors, level="INFO", prefix="[AGENT] ")
                             for tool_call in response_message['tool_calls']:
-                                print(f"{agent_prefix}{self.colors.OKBLUE}{self.colors.BOLD}Calling tool:{self.colors.ENDC} {tool_call['function']['name']} with args: {tool_call['function']['arguments']}")
+                                log_manager(f"{agent_prefix}{self.colors.OKBLUE}{self.colors.BOLD}Calling tool:{self.colors.ENDC} {tool_call['function']['name']} with args: {tool_call['function']['arguments']}", colors=self.colors, level="INFO", prefix="[AGENT] ")
                                 function_name = tool_call['function']['name']
                                 args = json.loads(tool_call['function']['arguments'])
                                 # Placeholder: implement tool call logic if needed
                             if 'task_completed' in [tc['function']['name'] for tc in response_message['tool_calls']]:
-                                print(f"{agent_prefix}{self.colors.OKGREEN}{self.colors.BOLD}Task completed.{self.colors.ENDC}")
+                                log_manager(f"{agent_prefix}{self.colors.OKGREEN}{self.colors.BOLD}Task completed.{self.colors.ENDC}", colors=self.colors, level="SUCCESS", prefix="[AGENT] ")
                                 break
                 except Exception as e:
                     error = str(e)
                     if self.verbose:
-                        print(f"{agent_prefix}{self.colors.FAIL}{self.colors.BOLD}Error:{self.colors.ENDC} Error in agent loop: {e}")
+                        log_manager(f"{agent_prefix}{self.colors.FAIL}{self.colors.BOLD}Error:{self.colors.ENDC} Error in agent loop: {e}", colors=self.colors, level="ERROR", prefix="[AGENT] ")
                     traceback.print_exc()
                 t1 = time.time()
                 try:
@@ -129,8 +126,8 @@ class Agent:
                             conn.commit()
                 except Exception:
                     pass
-                print(f"{agent_prefix}{self.colors.OKGREEN}Completed iteration {iteration+1} for task {task_idx+1}{self.colors.ENDC}")
+                log_manager(f"{agent_prefix}{self.colors.OKGREEN}Completed iteration {iteration+1} for task {task_idx+1}{self.colors.ENDC}", colors=self.colors, level="SUCCESS", prefix="[AGENT] ")
                 time.sleep(0.1)
-            print(f"{agent_prefix}{self.colors.OKGREEN}Completed task {task_idx+1}/{len(self.tasks)}: {task}{self.colors.ENDC}")
-        print(f"{agent_prefix}{self.colors.BOLD}{self.colors.OKGREEN}All assigned tasks and iterations complete!{self.colors.ENDC}")
+            log_manager(f"{agent_prefix}{self.colors.OKGREEN}Completed task {task_idx+1}/{len(self.tasks)}: {task}{self.colors.ENDC}", colors=self.colors, level="SUCCESS", prefix="[AGENT] ")
+        log_manager(f"{agent_prefix}{self.colors.BOLD}{self.colors.OKGREEN}All assigned tasks and iterations complete!{self.colors.ENDC}", colors=self.colors, level="SUCCESS", prefix="[AGENT] ")
         self.progress = agent_results

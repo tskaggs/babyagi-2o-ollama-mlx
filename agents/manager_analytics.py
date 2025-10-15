@@ -1,4 +1,5 @@
 # agents/manager_analytics.py
+from agents.logging_utils import log_manager
 import time
 
 class ManagerAnalytics:
@@ -18,8 +19,8 @@ class ManagerAnalytics:
                 ("\n".join(manager_summary), elapsed, token_count, run_id)
             )
             conn.commit()
-        print(f"\n{self.colors.BOLD}{self.colors.OKGREEN}All tasks are complete!{self.colors.ENDC}")
-        print(f"\n{self.colors.BOLD}{self.colors.OKBLUE}Manager: Do you have any questions, suggestions, or would you like to start a new task?{self.colors.ENDC}")
+        log_manager(f"\n{self.colors.BOLD}{self.colors.OKGREEN}All tasks are complete!{self.colors.ENDC}", colors=self.colors, level="SUCCESS")
+        log_manager(f"\n{self.colors.BOLD}{self.colors.OKBLUE}Manager: Do you have any questions, suggestions, or would you like to start a new task?{self.colors.ENDC}", colors=self.colors, level="INFO")
         user_input = input(f"{self.colors.BOLD}Enter your feedback or type a new task: {self.colors.ENDC}")
         if user_input.strip():
-            print(f"{self.colors.OKCYAN}Manager received your input: {user_input}{self.colors.ENDC}")
+            log_manager(f"{self.colors.OKCYAN}Manager received your input: {user_input}{self.colors.ENDC}", colors=self.colors, level="INFO")

@@ -1,4 +1,5 @@
 # agents/orchestration_service.py
+from agents.logging_utils import log_manager
 import time, json
 
 class OrchestrationService:
@@ -42,7 +43,7 @@ class OrchestrationService:
                         # --- Manager review logic ---
                         for review_attempt in range(3):
                             try:
-                                print(f"[MANAGER] {self.colors.BOLD}{self.colors.WARNING}Manager reviewing {name} task {agent_current_task[name]+1} iteration {iteration_counters[name]+1}:{self.colors.ENDC}\n{msg['content']}", flush=True)
+                                log_manager(f"{self.colors.BOLD}{self.colors.WARNING}Manager reviewing {name} task {agent_current_task[name]+1} iteration {iteration_counters[name]+1}:{self.colors.ENDC}\n{msg['content']}", colors=self.colors, level="WARNING")
                                 content_lower = msg['content'].lower()
                                 if 'task completed' in content_lower or 'done' in content_lower:
                                     approval = True
@@ -51,32 +52,32 @@ class OrchestrationService:
                                     approval = False
                                     reason = "Task requirements not met. Needs further iteration."
                                 if approval:
-                                    print(f"[MANAGER] {self.colors.OKGREEN}Manager APPROVED {name} task {agent_current_task[name]+1} iteration {iteration_counters[name]+1}: {reason}{self.colors.ENDC}", flush=True)
+                                    log_manager(f"{self.colors.OKGREEN}Manager APPROVED {name} task {agent_current_task[name]+1} iteration {iteration_counters[name]+1}: {reason}{self.colors.ENDC}", colors=self.colors, level="SUCCESS")
                                     summary = f"Task {agent_current_task[name]+1} completed by {name}: {msg['content']}"
                                     agent_task_summaries[name].append(summary)
                                     agent_current_task[name] += 1
                                     iteration_counters[name] = 0
                                     break
                                 else:
-                                    print(f"[MANAGER] {self.colors.FAIL}Manager DISAPPROVED {name} task {agent_current_task[name]+1} iteration {iteration_counters[name]+1}: {reason}{self.colors.ENDC}", flush=True)
+                                    log_manager(f"{self.colors.FAIL}Manager DISAPPROVED {name} task {agent_current_task[name]+1} iteration {iteration_counters[name]+1}: {reason}{self.colors.ENDC}", colors=self.colors, level="ERROR")
                                     iteration_counters[name] += 1
                                     break
                             except Exception as e:
-                                print(f"[MANAGER] {self.colors.FAIL}Manager review error for {name} task {agent_current_task[name]+1} iteration {iteration_counters[name]+1}: {e}{self.colors.ENDC}", flush=True)
+                                log_manager(f"{self.colors.FAIL}Manager review error for {name} task {agent_current_task[name]+1} iteration {iteration_counters[name]+1}: {e}{self.colors.ENDC}", colors=self.colors, level="ERROR")
                                 if review_attempt < 2:
-                                    print(f"[MANAGER] {self.colors.WARNING}Manager review retrying ({review_attempt+1}/3)...{self.colors.ENDC}", flush=True)
+                                    log_manager(f"{self.colors.WARNING}Manager review retrying ({review_attempt+1}/3)...{self.colors.ENDC}", colors=self.colors, level="WARNING")
                                     time.sleep(1)
                                 else:
-                                    print(f"[MANAGER] {self.colors.FAIL}Manager review failed after 3 attempts. Skipping review for this iteration.{self.colors.ENDC}", flush=True)
+                                    log_manager(f"{self.colors.FAIL}Manager review failed after 3 attempts. Skipping review for this iteration.{self.colors.ENDC}", colors=self.colors, level="ERROR")
                         # If agent has completed all tasks, mark as done
                         if agent_current_task[name] >= len(json.loads(get_agent_tasks(name))):
                             completed.add(name)
                         updated = True
             if updated:
-                print(f"[MANAGER] {self.colors.BOLD}{self.colors.OKBLUE}Manager Progress Report:{self.colors.ENDC}", flush=True)
+                log_manager(f"{self.colors.BOLD}{self.colors.OKBLUE}Manager Progress Report:{self.colors.ENDC}", colors=self.colors, level="INFO")
                 for name in self.agent_names:
                     status = progress[name] if progress[name] else "No update yet."
-                    print(f"[MANAGER]   {name}: {status}", flush=True)
+                    log_manager(f"  {name}: {status}", colors=self.colors, level="INFO")
             if len(completed) == len(self.agent_names):
                 break
             time.sleep(0.1)

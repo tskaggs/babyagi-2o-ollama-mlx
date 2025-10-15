@@ -4,6 +4,7 @@ from agents.agent_service import AgentService
 from agents.orchestration_service import OrchestrationService
 from agents.manager_analytics import ManagerAnalytics
 from agents.db import init_db, get_db
+from agents.logging_utils import log_manager
 import time, re, json
 
 class Manager:
@@ -39,7 +40,7 @@ class Manager:
                 response = self.ollama.chat(model=self.model_name, messages=messages)
             except Exception as e:
                 if 'hourly usage limit' in str(e) or 'status code: 402' in str(e):
-                    print(f"{self.colors.FAIL}Error Ollama: you've reached your hourly usage limit, please upgrade to continue{self.colors.ENDC}")
+                    log_manager("Error Ollama: you've reached your hourly usage limit, please upgrade to continue", colors=self.colors, level="ERROR")
                     exit(1)
                 else:
                     raise
@@ -58,7 +59,7 @@ class Manager:
                 if isinstance(agent_list, list) and all(isinstance(x, str) for x in agent_list):
                     return agent_list
             except Exception as e:
-                print(f"{self.colors.WARNING}Attempt {attempt+1}: Could not parse JSON from LLM response. Error: {e}")
+                log_manager(f"Attempt {attempt+1}: Could not parse JSON from LLM response. Error: {e}", colors=self.colors, level="WARNING")
             # Fallback: try to extract from numbered/bulleted list
             lines = content.splitlines()
             extracted = []
@@ -72,9 +73,9 @@ class Manager:
             sentences = re.split(r'(?<=[.!?])\s+', content.strip())
             sentences = [s.strip() for s in sentences if len(s.strip()) > 10]
             if len(sentences) > 1:
-                print(f"{self.colors.WARNING}LLM did not return a list, but split into {len(sentences)} subtasks using sentences. Raw response was:{self.colors.ENDC}\n{content}")
+                log_manager(f"LLM did not return a list, but split into {len(sentences)} subtasks using sentences. Raw response was:\n{content}", colors=self.colors, level="WARNING")
                 return sentences
-        print(f"{self.colors.FAIL}Could not parse agent list from LLM after 3 attempts and all fallbacks.\nRaw LLM response was:{self.colors.ENDC}\n{content}")
+        log_manager(f"Could not parse agent list from LLM after 3 attempts and all fallbacks.\nRaw LLM response was:\n{content}", colors=self.colors, level="ERROR")
         return [main_task]
 
     # [MANAGER] log only in main orchestration/review logic
@@ -92,11 +93,11 @@ class Manager:
         init_db()
         # Show two example tasks and allow user to select or enter their own
         example1 = "Scrape techmeme.com and summarize the top headlines."
-        example2 = "Analyze image.jpg in your folder and describe the image."
-        print(f"[MANAGER] {self.colors.BOLD}Describe the task you want to complete:{self.colors.ENDC}", flush=True)
-        print(f"[MANAGER]   1. {example1}", flush=True)
-        print(f"[MANAGER]   2. {example2}", flush=True)
-        print(f"[MANAGER]   3. Enter your own task", flush=True)
+        example2 = "Make a mini ai agent."
+        log_manager("Describe the task you want to complete:", colors=self.colors, level="BOLD")
+        log_manager(f"  1. {example1}")
+        log_manager(f"  2. {example2}")
+        log_manager("  3. Enter your own task")
         choice = input(f"{self.colors.OKBLUE}Select 1, 2, or type your own task:{self.colors.ENDC} ")
         if choice.strip() == '1':
             main_task = example1
@@ -106,11 +107,11 @@ class Manager:
             main_task = input(f"{self.colors.OKBLUE}Enter your custom task:{self.colors.ENDC} ")
         else:
             main_task = choice.strip()
-        print(f"[MANAGER] {self.colors.OKBLUE}Manager is analyzing the main task and creating minimal subtasks...{self.colors.ENDC}", flush=True)
+        log_manager("Manager is analyzing the main task and creating minimal subtasks...", colors=self.colors, level="INFO")
         agent_list = self.estimate_agents(main_task)
-        print(f"[MANAGER] {self.colors.OKGREEN}Manager created {len(agent_list)} minimal subtasks:{self.colors.ENDC}", flush=True)
+        log_manager(f"Manager created {len(agent_list)} minimal subtasks:", colors=self.colors, level="SUCCESS")
         for i, subtask in enumerate(agent_list):
-            print(f"[MANAGER]   {i+1}. {subtask}", flush=True)
+            log_manager(f"  {i+1}. {subtask}")
 
         # Prompt for number of agents (default 1)
         while True:
@@ -122,7 +123,6 @@ class Manager:
                 num_agents = int(num_agents)
                 if num_agents >= 1:
                     break
-
             except Exception:
                 pass
 
@@ -136,16 +136,16 @@ class Manager:
             for idx, subtask in enumerate(agent_list):
                 agent_subtasks[idx % num_agents].append(subtask)
 
-        print(f"\n[MANAGER] {self.colors.BOLD}Agent Assignments:{self.colors.ENDC}", flush=True)
+        log_manager("\nAgent Assignments:", colors=self.colors, level="BOLD")
         for idx, name in enumerate(agent_names):
             emoji = self.agent_emojis[idx % len(self.agent_emojis)]
             # Show all subtasks for each agent
             if num_agents == 1:
                 for j, subtask in enumerate(agent_list):
-                    print(f"[MANAGER]   {emoji} {name}: {subtask}", flush=True)
+                    log_manager(f"  {emoji} {name}: {subtask}")
             else:
                 for j, subtask in enumerate(agent_subtasks[idx]):
-                    print(f"[MANAGER]   {emoji} {name} subtask {j+1}: {subtask}", flush=True)
+                    log_manager(f"  {emoji} {name} subtask {j+1}: {subtask}")
 
         # Prompt for number of iterations (default 1)
         while True:
@@ -159,7 +159,7 @@ class Manager:
                     break
             except Exception:
                 pass
-            print(f"{self.colors.WARNING}Please enter a valid integer >= 1 or leave blank for 1.{self.colors.ENDC}")
+            log_manager("Please enter a valid integer >= 1 or leave blank for 1.", colors=self.colors, level="WARNING")
 
         self.num_agents = num_agents
         self.num_iterations = num_iterations
@@ -204,10 +204,10 @@ class Manager:
         self._db_run_id = run_id
         self._db_agent_ids = agent_ids
         # Show agent assignments
-        print(f"\n[MANAGER] {self.colors.BOLD}Agent Assignments:{self.colors.ENDC}", flush=True)
+        log_manager("\nAgent Assignments:", colors=self.colors, level="BOLD")
         for idx, name in enumerate(self.agent_names):
             emoji = self.agent_emojis[idx % len(self.agent_emojis)]
-            print(f"[MANAGER]   {emoji} {name}: {agent_list[idx]}", flush=True)
+            log_manager(f"  {emoji} {name}: {agent_list[idx]}")
 
         # Use OrchestrationService for main review/approval loop
         orchestration_service = OrchestrationService(
