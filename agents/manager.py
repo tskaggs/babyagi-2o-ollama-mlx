@@ -1,8 +1,10 @@
 # agents/manager.py
 from agents.message_bus import MessageBus
-from agents.agent import Agent
+from agents.agent_service import AgentService
+from agents.orchestration_service import OrchestrationService
+from agents.manager_analytics import ManagerAnalytics
 from agents.db import init_db, get_db
-import time, re, json, threading
+import time, re, json
 
 class Manager:
     def __init__(self, model_name, ollama, colors, agent_colors, agent_emojis, verbose=False):
@@ -76,29 +78,8 @@ class Manager:
         return [main_task]
 
     # [MANAGER] log only in main orchestration/review logic
-    def create_agents(self, agent_list):
-        self.agent_names = []
-        self.agents = []
-        for idx, agent_task in enumerate(agent_list):
-            agent_name = f"agent_{idx+1}"
-            self.agent_names.append(agent_name)
-            color = self.agent_colors[idx % len(self.agent_colors)]
-            emoji = self.agent_emojis[idx % len(self.agent_emojis)]
-            agent = Agent(
-                name=agent_name,
-                task=agent_task,
-                color=color,
-                emoji=emoji,
-                model_name=self.model_name,
-                ollama=self.ollama,
-                colors=self.colors,
-                bus=self.bus,
-                verbose=self.verbose,
-                max_iterations=self.num_iterations
-            )
-            t = threading.Thread(target=agent.run)
-            self.agents.append(t)
-            t.start()
+    # Agent creation is now handled by AgentService
+    pass
 
 
     def assign_tasks(self, agent_list):
@@ -203,8 +184,18 @@ class Manager:
                 c.execute("INSERT INTO agents (run_id, agent_name, assigned_subtask) VALUES (?, ?, ?)", (run_id, agent_name, json.dumps(agent_subtasks[idx])))
                 agent_ids[agent_name] = c.lastrowid
             conn.commit()
-        self.create_agents(agent_subtasks)
-        self.agent_names = agent_names
+        # Use AgentService for agent creation
+        agent_service = AgentService(
+            agent_colors=self.agent_colors,
+            agent_emojis=self.agent_emojis,
+            model_name=self.model_name,
+            ollama=self.ollama,
+            colors=self.colors,
+            bus=self.bus,
+            verbose=self.verbose,
+            num_iterations=self.num_iterations
+        )
+        self.agent_names, self.agents = agent_service.create_agents(agent_subtasks)
         self.progress = {name: None for name in self.agent_names}
         self.completed = set()
         start_time = time.time()
@@ -218,92 +209,34 @@ class Manager:
             emoji = self.agent_emojis[idx % len(self.agent_emojis)]
             print(f"[MANAGER]   {emoji} {name}: {agent_list[idx]}", flush=True)
 
-        # --- Main review/approval loop ---
-        # --- Main review/approval loop (clean implementation) ---
-        iteration_counters = {name: 0 for name in self.agent_names}
-        last_update_times = {name: None for name in self.agent_names}
-        agent_task_progress = {name: [] for name in self.agent_names}
-        agent_task_summaries = {name: [] for name in self.agent_names}
-        agent_current_task = {name: 0 for name in self.agent_names}
+        # Use OrchestrationService for main review/approval loop
+        orchestration_service = OrchestrationService(
+            bus=self.bus,
+            agent_names=self.agent_names,
+            db_run_id=self._db_run_id,
+            db_agent_ids=self._db_agent_ids,
+            colors=self.colors,
+            agent_emojis=self.agent_emojis
+        )
+        token_count_box = [token_count]  # mutable box for token_count
+        agent_task_progress, agent_task_summaries = orchestration_service.run_orchestration(
+            num_iterations=self.num_iterations,
+            get_agent_tasks=self._get_agent_tasks,
+            progress=self.progress,
+            completed=self.completed,
+            _get_db=get_db,
+            token_count=token_count_box
+        )
 
-        while True:
-            updated = False
-            for name in self.agent_names:
-                if name in self.completed:
-                    continue
-                now = time.time()
-                msgs = self.bus.receive("manager", since=0)
-                for msg in msgs:
-                    if msg['sender'] == name and self.progress[name] != msg['content']:
-                        prev_time = last_update_times[name] or now
-                        duration = now - prev_time
-                        last_update_times[name] = now
-                        self.progress[name] = msg['content']
-                        token_count += len(msg['content'].split())
-                        # Save iteration to DB
-                        with get_db() as conn:
-                            c = conn.cursor()
-                            c.execute(
-                                "INSERT INTO agent_iterations (agent_id, iteration, response, duration, tokens_used) VALUES (?, ?, ?, ?, ?)",
-                                (self._db_agent_ids[name], iteration_counters[name], msg['content'], duration, len(msg['content'].split()))
-                            )
-                        # Track progress for review
-                        agent_task_progress[name].append((agent_current_task[name], iteration_counters[name], msg['content']))
-                        # --- Manager review logic ---
-                        for review_attempt in range(3):
-                            try:
-                                print(f"[MANAGER] {self.colors.BOLD}{self.colors.WARNING}Manager reviewing {name} task {agent_current_task[name]+1} iteration {iteration_counters[name]+1}:{self.colors.ENDC}\n{msg['content']}", flush=True)
-                                content_lower = msg['content'].lower()
-                                if 'task completed' in content_lower or 'done' in content_lower:
-                                    approval = True
-                                    reason = "Task requirements met (contains 'task completed' or 'done')."
-                                else:
-                                    approval = False
-                                    reason = "Task requirements not met. Needs further iteration."
-                                if approval:
-                                    print(f"[MANAGER] {self.colors.OKGREEN}Manager APPROVED {name} task {agent_current_task[name]+1} iteration {iteration_counters[name]+1}: {reason}{self.colors.ENDC}", flush=True)
-                                    summary = f"Task {agent_current_task[name]+1} completed by {name}: {msg['content']}"
-                                    agent_task_summaries[name].append(summary)
-                                    agent_current_task[name] += 1
-                                    iteration_counters[name] = 0
-                                    break
-                                else:
-                                    print(f"[MANAGER] {self.colors.FAIL}Manager DISAPPROVED {name} task {agent_current_task[name]+1} iteration {iteration_counters[name]+1}: {reason}{self.colors.ENDC}", flush=True)
-                                    iteration_counters[name] += 1
-                                    break
-                            except Exception as e:
-                                print(f"[MANAGER] {self.colors.FAIL}Manager review error for {name} task {agent_current_task[name]+1} iteration {iteration_counters[name]+1}: {e}{self.colors.ENDC}", flush=True)
-                                if review_attempt < 2:
-                                    print(f"[MANAGER] {self.colors.WARNING}Manager review retrying ({review_attempt+1}/3)...{self.colors.ENDC}", flush=True)
-                                    time.sleep(1)
-                                else:
-                                    print(f"[MANAGER] {self.colors.FAIL}Manager review failed after 3 attempts. Skipping review for this iteration.{self.colors.ENDC}", flush=True)
-                        # If agent has completed all tasks, mark as done
-                        if agent_current_task[name] >= len(json.loads(self._get_agent_tasks(name))):
-                            self.completed.add(name)
-                        updated = True
-            if updated:
-                print(f"[MANAGER] {self.colors.BOLD}{self.colors.OKBLUE}Manager Progress Report:{self.colors.ENDC}", flush=True)
-                for name in self.agent_names:
-                    status = self.progress[name] if self.progress[name] else "No update yet."
-                    print(f"[MANAGER]   {name}: {status}", flush=True)
-            if len(self.completed) == len(self.agent_names):
-                break
-            time.sleep(0.1)
-
-        # Summarize all completed tasks for each agent
-        print(f"\n[MANAGER] {self.colors.BOLD}{self.colors.OKBLUE}Manager Task Summaries:{self.colors.ENDC}", flush=True)
-        for name in self.agent_names:
-            for summary in agent_task_summaries[name]:
-                print(f"[MANAGER] {self.colors.OKCYAN}{summary}{self.colors.ENDC}", flush=True)
-
-        # Final review and summary
-        print(f"\n[MANAGER] {self.colors.BOLD}{self.colors.OKGREEN}Manager Full Review of Solution:{self.colors.ENDC}", flush=True)
-        for name in self.agent_names:
-            print(f"[MANAGER] {self.colors.BOLD}{name}:{self.colors.ENDC}", flush=True)
-            for (task_idx, iteration, content) in agent_task_progress[name]:
-                print(f"[MANAGER]   Task {task_idx+1}, Iteration {iteration+1}: {content}", flush=True)
-        print(f"\n[MANAGER] {self.colors.BOLD}{self.colors.OKGREEN}All agents and tasks are complete!{self.colors.ENDC}", flush=True)
+        # Summarize and log run using ManagerAnalytics
+        analytics = ManagerAnalytics(get_db, self.colors)
+        analytics.save_run_summary(
+            run_id=self._db_run_id,
+            agent_names=self.agent_names,
+            progress=self.progress,
+            start_time=start_time,
+            token_count=token_count_box[0]
+        )
 
 
     def _get_agent_tasks(self, name):
