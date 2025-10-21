@@ -1,4 +1,4 @@
-# babyagi-2o + Ollama
+# babyagi-2o + Ollama + MLX
 
 **BabyAGI 2o** - *the simplest self-building autonomous agent.*
 
@@ -83,6 +83,41 @@ BabyAGI 2o is an exploration into creating the simplest self-building autonomous
    ~~~
 
 **No API keys or .env setup required!** All LLM calls are handled locally via Ollama.
+
+## MLX Agent (Qwen3-Coder-30B-A3B-Instruct-4bit)
+
+You can also run an agent using [mlx-lm](https://github.com/ml-explore/mlx-examples/tree/main/lm) and the Qwen3-Coder-30B-A3B-Instruct-4bit model on Apple Silicon (macOS, M-series recommended).
+
+### Requirements
+- Python 3.8+
+- Apple Silicon (M1/M2/M3/M4/M5 recommended)
+- `mlx-lm` Python package
+
+### Installation
+
+1. Install `mlx-lm`:
+   ~~~bash
+   pip install mlx-lm
+   ~~~
+2. (Optional) Create a virtual environment as above.
+
+### Running the MLX Agent
+
+The MLX agent is in `mlx/qwen3_agent.py` and uses the Qwen3-Coder-30B-A3B-Instruct-4bit model from HuggingFace.
+
+Example usage:
+~~~bash
+python mlx/qwen3_agent.py
+~~~
+
+This will load the model and run a sample prompt. You can modify the script to integrate with your own workflows or call the agent from other Python code.
+
+#### Model Reference
+- [Qwen3-Coder-30B-A3B-Instruct-4bit on HuggingFace](https://huggingface.co/mlx-community/Qwen3-Coder-30B-A3B-Instruct-4bit)
+
+> **Note:** The MLX agent is independent of the Ollama-based system and is intended for experimentation with Apple Silicon and MLX models.
+
+---
 
 ## Usage
 
